@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 from aws_cdk.core import Stack, CustomResource, RemovalPolicy
 
 from b_cfn_twilio_activity.function import TwilioActivitySingletonFunction
@@ -25,40 +27,56 @@ class TwilioActivityResource(CustomResource):
             removal_policy=RemovalPolicy.DESTROY,
             properties={
                 # Created by default.
-                'OfflineActivity': {
-                    'friendly_name': 'Offline',
-                    'availability': False
-                },
+                'OfflineActivity': self.offline_activity,
                 # Created by default.
-                'AvailableActivity': {
-                    'friendly_name': 'Available',
-                    'availability': True
-                },
+                'AvailableActivity': self.available_activity,
                 # Created by default.
-                'UnavailableActivity': {
-                    'friendly_name': 'Unavailable',
-                    'availability': False
-                },
+                'UnavailableActivity': self.unavailable_activity,
                 # Custom activity, used after finishing a call (post-work activity).
-                'WrapUpActivity': {
-                    'friendly_name': 'Wrap Up',
-                    'availability': False
-                }
+                'WrapUpActivity': self.wrap_up_activity
             }
         )
 
     @property
-    def offline_activity_sid(self):
+    def offline_activity_sid(self) -> str:
         return self.get_att_string('OfflineActivitySid')
 
     @property
-    def available_activity_sid(self):
+    def offline_activity(self) -> Dict[str, Any]:
+        return {
+            'friendly_name': 'Offline',
+            'availability': False
+        }
+
+    @property
+    def available_activity_sid(self) -> str:
         return self.get_att_string('AvailableActivitySid')
 
     @property
-    def unavailable_activity_sid(self):
+    def available_activity(self) -> Dict[str, Any]:
+        return {
+            'friendly_name': 'Available',
+            'availability': True
+        }
+
+    @property
+    def unavailable_activity_sid(self) -> str:
         return self.get_att_string('UnavailableActivitySid')
 
     @property
-    def wrap_up_activity_sid(self):
+    def unavailable_activity(self) -> Dict[str, Any]:
+        return {
+            'friendly_name': 'Unavailable',
+            'availability': False
+        }
+
+    @property
+    def wrap_up_activity_sid(self) -> str:
         return self.get_att_string('WrapUpActivitySid')
+
+    @property
+    def wrap_up_activity(self) -> Dict[str, Any]:
+        return {
+            'friendly_name': 'Wrap Up',
+            'availability': False
+        }
