@@ -2,6 +2,7 @@ from aws_cdk.core import Stack
 
 from b_cfn_twilio_activity.function import TwilioActivitySingletonFunction
 from b_cfn_twilio_activity.resource import TwilioActivityResource
+from b_cfn_twilio_activity.twilio_activity import TwilioActivity
 
 
 class TestingInfrastructure(Stack):
@@ -20,7 +21,10 @@ class TestingInfrastructure(Stack):
             twilio_workspace_sid='Test3'
         )
 
+        offline_activity = TwilioActivity(friendly_name='Offline', availability=False, default=False)
+
         TwilioActivityResource(
             scope=self,
-            activity_function=function
+            activity_function=function,
+            activities=[offline_activity]
         )

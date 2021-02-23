@@ -66,5 +66,7 @@ def handler(event, context) -> None:
     except ClientError as ex:
         err_msg = f'{repr(ex)}:{ex.response}'
         response.respond(CfnResponse.CfnResponseStatus.FAILED, status_reason=err_msg)
+        logger.exception(ex)
     except Exception as ex:
         response.respond(CfnResponse.CfnResponseStatus.FAILED, status_reason=repr(ex))
+        logger.exception(ex)
