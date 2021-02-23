@@ -1,5 +1,8 @@
 # Release history
 
+### 1.0.0
+* Major refactor. Add possibility to define activities dynamically.
+
 ### 0.0.3
 * Add possibility to access activity definitions.
 
