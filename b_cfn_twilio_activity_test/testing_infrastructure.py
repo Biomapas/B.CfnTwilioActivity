@@ -21,7 +21,7 @@ class TestingInfrastructure(Stack):
             twilio_workspace_sid='Test3'
         )
 
-        offline_activity = TwilioActivity(friendly_name='Offline', availability=False, default=False)
+        offline_activity = TwilioActivity(friendly_name='Offline', availability=False, default=True)
 
         TwilioActivityResource(
             scope=self,
