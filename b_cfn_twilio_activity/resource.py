@@ -49,4 +49,4 @@ class TwilioActivityResource(CustomResource):
         return self.get_att_string(f'{self.__parametrize_name(friendly_name)}ActivitySid')
 
     def __parametrize_name(self, friendly_name: str) -> str:
-        return ''.join(friendly_name.split(' '))
+        return friendly_name.replace(' ', '')
