@@ -28,6 +28,9 @@ class TwilioActivityResource(CustomResource):
         if default_activities_count != 1:
             raise AttributeError('Exactly one activity must be default in a Workspace.')
 
+        if len(activities) != len(set([activity.friendly_name for activity in activities])):
+            raise AttributeError('Two activities can not have the same name.')
+
         self.__activities = {
             f'{self.__parametrize_name(activity.friendly_name)}Activity': {
                 'friendly_name': activity.friendly_name,
