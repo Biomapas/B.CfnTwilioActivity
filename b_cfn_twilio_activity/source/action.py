@@ -2,12 +2,14 @@ import base64
 import json
 import logging
 import os
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 from twilio.base.exceptions import TwilioException
 from twilio.rest import Client
+from twilio.rest.taskrouter.v1.workspace import WorkspaceContext
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class Action:
@@ -20,14 +22,15 @@ class Action:
             self.TWILIO_ACCOUNT_SID = os.environ['TWILIO_ACCOUNT_SID']
             self.TWILIO_AUTH_TOKEN = os.environ['TWILIO_AUTH_TOKEN']
             self.TWILIO_WORKSPACE_SID = os.environ['TWILIO_WORKSPACE_SID']
-
-            self.TWILIO_OFFLINE_ACTIVITY = self.__parameters['OfflineActivity']
-            self.TWILIO_AVAILABLE_ACTIVITY = self.__parameters['AvailableActivity']
-            self.TWILIO_UNAVAILABLE_ACTIVITY = self.__parameters['UnavailableActivity']
-            self.TWILIO_WRAP_UP_ACTIVITY = self.__parameters['WrapUpActivity']
         except KeyError as ex:
             logger.error(f'Missing environment: {repr(ex)}.')
             raise
+
+        self.__activities = {
+            key: value
+            for key, value in self.__parameters.items()
+            if key.endswith('Activity')
+        }
 
         self.client = self.__get_twilio_client(self.TWILIO_ACCOUNT_SID, self.TWILIO_AUTH_TOKEN)
 
@@ -44,30 +47,45 @@ class Action:
         workspace = self.client.taskrouter.workspaces.get(self.TWILIO_WORKSPACE_SID)
 
         # Find activities created by default.
-        offline_activity = workspace.activities.list(
-            friendly_name=self.TWILIO_OFFLINE_ACTIVITY['friendly_name'],
-            available=self.TWILIO_OFFLINE_ACTIVITY['availability']
-        )[0]
+        created_activities = {
+            'OfflineActivity': workspace.activities.list(friendly_name='Offline')[0],
+            'AvailableActivity': workspace.activities.list(friendly_name='Available')[0],
+            'UnavailableActivity': workspace.activities.list(friendly_name='Unavailable')[0],
+        }
 
-        available_activity = workspace.activities.list(
-            friendly_name=self.TWILIO_AVAILABLE_ACTIVITY['friendly_name'],
-            available=self.TWILIO_AVAILABLE_ACTIVITY['availability']
-        )[0]
+        # It is safe to assume that this value will always be set in the following loop, since the resource requires exactly one activity to be default.
+        default_activity_sid = None
 
-        unavailable_activity = workspace.activities.list(
-            friendly_name=self.TWILIO_UNAVAILABLE_ACTIVITY['friendly_name'],
-            available=self.TWILIO_UNAVAILABLE_ACTIVITY['availability']
-        )[0]
+        # Create new activities.
+        for key, activity in self.__activities.items():
+            if not created_activities.get(key):
+                created_activities[key] = workspace.activities.create(
+                    friendly_name=activity['friendly_name'],
+                    available=activity['availability'],
+                )
 
-        # Create defined activities from scratch.
+            if activity['default']:
+                default_activity_sid = created_activities[key].sid
+
+        # Set the default activity.
+        workspace.update(
+            default_activity_sid=default_activity_sid,
+            timeout_activity_sid=default_activity_sid
+        )
+
+        # Prepare unused default activities for deletion.
+        delete_keys: List[Tuple[str, str]] = []
+        for key, activity in created_activities.items():
+            if not self.__activities.get(key):
+                delete_keys.append((key, activity.sid))
+
+        # Delete unused default activities.
+        for key, activity_sid in delete_keys:
+            created_activities.pop(key)
+            self.__force_delete_activity(workspace, activity_sid, default_activity_sid)
+
         activity_sids = {
-            'OfflineActivitySid': offline_activity.sid,
-            'AvailableActivitySid': available_activity.sid,
-            'UnavailableActivitySid': unavailable_activity.sid,
-            'WrapUpActivitySid': workspace.activities.create(
-                friendly_name=self.TWILIO_WRAP_UP_ACTIVITY['friendly_name'],
-                available=self.TWILIO_WRAP_UP_ACTIVITY['availability']
-            ).sid,
+            f'{parameter_name}Sid': activity.sid for parameter_name, activity in created_activities.items()
         }
 
         return activity_sids, base64.b64encode(json.dumps(activity_sids).encode('utf-8')).decode('utf-8')
@@ -83,14 +101,42 @@ class Action:
         logger.info(f'Initiating resource update with these parameters: {json.dumps(self.__parameters)}.')
 
         activity_sids: Dict[str, str] = json.loads(base64.b64decode(self.__resource_id))
-
         workspace = self.client.taskrouter.workspaces.get(self.TWILIO_WORKSPACE_SID)
-        wrap_up_activity = workspace.activities.get(activity_sids['WrapUpActivitySid']).fetch()
 
-        if wrap_up_activity.friendly_name != self.TWILIO_WRAP_UP_ACTIVITY['friendly_name']:
-            wrap_up_activity.update(friendly_name=self.TWILIO_WRAP_UP_ACTIVITY['friendly_name'])
+        # It is safe to assume that this value will always be set in the following loop, since the resource requires exactly one activity to be default.
+        default_activity_sid = None
 
-        return activity_sids, self.__resource_id
+        # Create newly added activities.
+        for activity_key, activity in self.__activities.items():
+            activity_sid_key = f'{activity_key}Sid'
+            if not activity_sids.get(activity_sid_key):
+                activity_sids[activity_sid_key] = workspace.activities.create(
+                    friendly_name=activity['friendly_name'],
+                    available=activity['availability'],
+                ).sid
+
+            if activity['default']:
+                default_activity_sid = activity_sids[activity_sid_key]
+
+        # Update default activity.
+        workspace.update(
+            default_activity_sid=default_activity_sid,
+            timeout_activity_sid=default_activity_sid
+        )
+
+        # Prepare removed activities for deletion.
+        delete_keys: List[Tuple[str, str]] = []
+        for activity_sid_key, activity_sid in activity_sids.items():
+            activity_key = activity_sid_key[0:-3]  # Remove Sid prefix from the key, to access locally stored activities.
+            if not self.__activities.get(activity_key):
+                delete_keys.append((activity_sid_key, activity_sid))
+
+        # Delete removed activities.
+        for key, activity_sid in delete_keys:
+            activity_sids.pop(key)
+            self.__force_delete_activity(workspace, activity_sid, default_activity_sid)
+
+        return activity_sids, base64.b64encode(json.dumps(activity_sids).encode('utf-8')).decode('utf-8')
 
     def delete(self) -> Tuple[Optional[Dict[Any, Any]], Optional[str]]:
         """
@@ -104,9 +150,15 @@ class Action:
 
         activity_sids: Dict[str, str] = json.loads(base64.b64decode(self.__resource_id))
 
-        self.client.taskrouter.workspaces.get(self.TWILIO_WORKSPACE_SID).activities.get(activity_sids['WrapUpActivitySid']).delete()
+        # It is not worth deleting activities, since destroying a workspace will delete them anyways.
 
-        return activity_sids, self.__resource_id
+        return activity_sids, base64.b64encode(json.dumps(activity_sids).encode('utf-8')).decode('utf-8')
+
+    def __force_delete_activity(self, workspace: WorkspaceContext, activity_sid: str, default_activity_sid: str) -> None:
+        for worker in workspace.workers.list(activity_sid=activity_sid):
+            worker.update(activity_sid=default_activity_sid)
+
+        workspace.activities(sid=activity_sid).delete()
 
     @staticmethod
     def __get_twilio_client(account_sid: str, auth_token: str) -> Client:

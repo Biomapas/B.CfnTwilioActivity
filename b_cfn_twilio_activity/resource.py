@@ -1,8 +1,9 @@
-from typing import Any, Dict
+from typing import List
 
 from aws_cdk.core import Stack, CustomResource, RemovalPolicy
 
 from b_cfn_twilio_activity.function import TwilioActivitySingletonFunction
+from b_cfn_twilio_activity.twilio_activity import TwilioActivity
 
 
 class TwilioActivityResource(CustomResource):
@@ -17,66 +18,35 @@ class TwilioActivityResource(CustomResource):
     def __init__(
             self,
             scope: Stack,
-            activity_function: TwilioActivitySingletonFunction
+            activity_function: TwilioActivitySingletonFunction,
+            activities: List[TwilioActivity]
     ) -> None:
+        if len(activities) == 0:
+            raise AttributeError('At least one activity must be provided.')
+
+        default_activities_count = len([activity.default for activity in activities if activity.default])
+        if default_activities_count != 1:
+            raise AttributeError('Exactly one activity must be default in a Workspace.')
+
+        self.__activities = {
+            f'{self.__parametrize_name(activity.friendly_name)}Activity': {
+                'friendly_name': activity.friendly_name,
+                'availability': activity.availability,
+                'default': activity.default
+            } for activity in activities
+        }
+
         super().__init__(
             scope=scope,
             id=f'CustomResource{activity_function.function_name}',
             service_token=activity_function.function_arn,
             pascal_case_properties=True,
             removal_policy=RemovalPolicy.DESTROY,
-            properties={
-                # Created by default.
-                'OfflineActivity': self.offline_activity,
-                # Created by default.
-                'AvailableActivity': self.available_activity,
-                # Created by default.
-                'UnavailableActivity': self.unavailable_activity,
-                # Custom activity, used after finishing a call (post-work activity).
-                'WrapUpActivity': self.wrap_up_activity
-            }
+            properties=self.__activities
         )
 
-    @property
-    def offline_activity_sid(self) -> str:
-        return self.get_att_string('OfflineActivitySid')
+    def get_activity_sid(self, friendly_name: str) -> str:
+        return self.get_att_string(f'{self.__parametrize_name(friendly_name)}ActivitySid')
 
-    @property
-    def offline_activity(self) -> Dict[str, Any]:
-        return {
-            'friendly_name': 'Offline',
-            'availability': False
-        }
-
-    @property
-    def available_activity_sid(self) -> str:
-        return self.get_att_string('AvailableActivitySid')
-
-    @property
-    def available_activity(self) -> Dict[str, Any]:
-        return {
-            'friendly_name': 'Available',
-            'availability': True
-        }
-
-    @property
-    def unavailable_activity_sid(self) -> str:
-        return self.get_att_string('UnavailableActivitySid')
-
-    @property
-    def unavailable_activity(self) -> Dict[str, Any]:
-        return {
-            'friendly_name': 'Unavailable',
-            'availability': False
-        }
-
-    @property
-    def wrap_up_activity_sid(self) -> str:
-        return self.get_att_string('WrapUpActivitySid')
-
-    @property
-    def wrap_up_activity(self) -> Dict[str, Any]:
-        return {
-            'friendly_name': 'Wrap Up',
-            'availability': False
-        }
+    def __parametrize_name(self, friendly_name: str) -> str:
+        return ''.join(friendly_name.split(' '))
